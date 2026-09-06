@@ -13,7 +13,7 @@ resource federation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedI
   name: 'github-main'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:ref:refs/heads/main'
+    subject: 'repo:apurvasharan17@120978575/contoso-assignment-2@1358930406:ref:refs/heads/main'
     audiences: ['api://AzureADTokenExchange']
   }
 }
