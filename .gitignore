@@ -1,0 +1,5 @@
+app/node_modules/
+app/dist/
+*.zip
+infra/*.json
+.DS_Store

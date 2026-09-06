@@ -1,0 +1,129 @@
+name: Contoso CI-CD
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contoso-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  NAME_PREFIX: ${{ vars.NAME_PREFIX }}
+
+jobs:
+  build_test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install, test and build
+        working-directory: app
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Validate Bicep syntax
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep build --file infra/bootstrap.bicep --stdout > /dev/null
+      - name: Package application
+        run: cd app/dist && zip -r ../../app.zip .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: application
+          path: app.zip
+          retention-days: 7
+
+  infrastructure:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build_test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      dev_name: ${{ steps.deploy.outputs.dev_name }}
+      prod_name: ${{ steps.deploy.outputs.prod_name }}
+      dev_url: ${{ steps.deploy.outputs.dev_url }}
+      prod_url: ${{ steps.deploy.outputs.prod_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Preview infrastructure
+        run: |
+          az deployment group what-if --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep --parameters namePrefix="$NAME_PREFIX"
+      - name: Apply infrastructure
+        id: deploy
+        run: |
+          az deployment group create --name "ci-${GITHUB_RUN_ID}" \
+            --resource-group "$RESOURCE_GROUP" --template-file infra/main.bicep \
+            --parameters namePrefix="$NAME_PREFIX" --query properties.outputs -o json > outputs.json
+          echo "dev_name=$(jq -r .devAppName.value outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "prod_name=$(jq -r .prodAppName.value outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "dev_url=$(jq -r .devUrl.value outputs.json)" >> "$GITHUB_OUTPUT"
+          echo "prod_url=$(jq -r .prodUrl.value outputs.json)" >> "$GITHUB_OUTPUT"
+
+  deploy_dev:
+    needs: [build_test, infrastructure]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: application
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ needs.infrastructure.outputs.dev_name }}
+          package: app.zip
+      - name: Verify development release
+        env:
+          APP_URL: ${{ needs.infrastructure.outputs.dev_url }}
+        run: python3 scripts/smoke.py "$APP_URL" dev "$GITHUB_SHA"
+
+  deploy_prod:
+    needs: [infrastructure, deploy_dev]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: application
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ needs.infrastructure.outputs.prod_name }}
+          package: app.zip
+      - name: Verify production release
+        env:
+          APP_URL: ${{ needs.infrastructure.outputs.prod_url }}
+        run: python3 scripts/smoke.py "$APP_URL" prod "$GITHUB_SHA"

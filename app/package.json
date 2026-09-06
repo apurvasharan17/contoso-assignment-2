@@ -1,0 +1,13 @@
+{
+  "name": "contoso-assignment-2",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "build": "node --check server.js && node build.js"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
