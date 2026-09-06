@@ -9,7 +9,7 @@ function handler(req, res) {
     res.end(JSON.stringify({ status: 'ok', environment: process.env.APP_ENV || 'local', version: release.version }));
   } else if (req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<h1>Contoso Learning Solutions</h1><p>Assignment 2: automated deployment using Bicep and GitHub Actions.</p>');
+    res.end('<h1>Contoso Learning Solutions</h1><h2>Version 2 deployed successfully!</h2><p>Developed by Apurva | PES1PG25CA026</p><p>This update was automatically deployed through GitHub Actions.</p>');
   } else {
     res.writeHead(404);
     res.end('Not found');
